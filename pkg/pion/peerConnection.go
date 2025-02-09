@@ -4,35 +4,16 @@ import (
 	"fmt"
 	"github.com/pion/webrtc/v4"
 	"log"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"zmeet/pkg/logger"
 )
 
-type PeerConnectionService interface {
-	CreateOffer()
-	CreateAnswer()
-	SetLocalDescription()
-	SetRemoteDescription()
-	ICEConnectionStateChangeNotify()
-	SignalingStateChangeNotify()
-}
-
 type PC struct {
-	mu                    sync.RWMutex
-	peerConnection        *webrtc.PeerConnection
-	peerConnectionService PeerConnectionService
-	customLogger          *logger.Logger
-}
-
-func parseUint16(value string) uint16 {
-	port, err := strconv.ParseUint(value, 10, 16)
-	if err != nil {
-		panic(err)
-	}
-	return uint16(port)
+	mu              sync.RWMutex
+	peerConnection  *webrtc.PeerConnection
+	customLogger    *logger.Logger
+	iceConnected    bool
+	connectionState bool
 }
 
 func NewPeerConnection(l *logger.Logger) *PC {
@@ -40,16 +21,16 @@ func NewPeerConnection(l *logger.Logger) *PC {
 	mediaEngine := webrtc.MediaEngine{}
 	_ = mediaEngine.RegisterDefaultCodecs()
 
-	ips := strings.Split(os.Getenv("IP_LIST"), ",")
-	settingEngine := webrtc.SettingEngine{}
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine))
 
-	settingEngine.SetNAT1To1IPs(ips, webrtc.ICECandidateTypeHost)
-	_ = settingEngine.SetEphemeralUDPPortRange(parseUint16(os.Getenv("PORT_MIN")), parseUint16(os.Getenv("PORT_MAX")))
-	settingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	config := webrtc.Configuration{
+		ICEServers: []webrtc.ICEServer{
+			{
+				URLs: []string{"stun:stun.l.google.com:19302"},
+			},
+		},
+	}
 
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine), webrtc.WithSettingEngine(settingEngine))
-
-	config := webrtc.Configuration{}
 	pc, err := api.NewPeerConnection(config)
 	if err != nil {
 		l.Debug("Failed to create peer connection")
@@ -57,15 +38,28 @@ func NewPeerConnection(l *logger.Logger) *PC {
 	}
 
 	newPc := &PC{
-		peerConnection: pc,
-		customLogger:   l,
+		peerConnection:  pc,
+		customLogger:    l,
+		iceConnected:    false,
+		connectionState: false,
 	}
 
-	newPc.ICEConnectionStateChangeNotify()
-	//newPc.SignalingStateChangeNotify()
-	newPc.ConnectionStateChangeNotify()
+	go newPc.ICEConnectionStateChangeNotify()
+	go newPc.ConnectionStateChangeNotify()
 
 	return newPc
+}
+
+func (p *PC) SetICEConnected(state bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.iceConnected = state
+}
+
+func (p *PC) SetConnectionState(state bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.connectionState = state
 }
 
 func (p *PC) PeerConnection() *webrtc.PeerConnection {
@@ -78,6 +72,18 @@ func (p *PC) CustomLogger() *logger.Logger {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.customLogger
+}
+
+func (p *PC) ICEConnected() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.iceConnected
+}
+
+func (p *PC) ConnectionState() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.connectionState
 }
 
 func (p *PC) CreateOffer() (webrtc.SessionDescription, error) {
@@ -127,10 +133,23 @@ func (p *PC) SetRemoteDescription(desc webrtc.SessionDescription) {
 	}
 }
 
+func (p *PC) AddICECandidate(ice webrtc.ICECandidateInit) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	err := p.peerConnection.AddICECandidate(ice)
+	if err != nil {
+		p.customLogger.Debug("Failed to add ICECandidate")
+	}
+}
+
 func (p *PC) ICEConnectionStateChangeNotify() {
 	p.PeerConnection().OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		mess := fmt.Sprintf("ICE Connection State has changed to: %s", state.String())
 		p.CustomLogger().Info(mess)
+		if state == webrtc.ICEConnectionStateConnected {
+			p.SetICEConnected(true)
+		}
 	})
 }
 
@@ -144,6 +163,16 @@ func (p *PC) SignalingStateChangeNotify() {
 func (p *PC) ConnectionStateChangeNotify() {
 	p.PeerConnection().OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		mess := fmt.Sprintf("Connection State has changed to: %s", state.String())
+		p.CustomLogger().Info(mess)
+		if state == webrtc.PeerConnectionStateConnected {
+			p.SetConnectionState(true)
+		}
+	})
+}
+
+func (p *PC) OnICECandidate() {
+	p.PeerConnection().OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		mess := fmt.Sprintf("Candiate : %s", candidate)
 		p.CustomLogger().Info(mess)
 	})
 }

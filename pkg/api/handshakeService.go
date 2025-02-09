@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pion/webrtc/v4"
@@ -8,6 +9,7 @@ import (
 	"zmeet/pkg/pion"
 	"zmeet/pkg/store"
 	"zmeet/pkg/user"
+	"zmeet/pkg/util"
 )
 
 type SDPRequest struct {
@@ -17,10 +19,13 @@ type SDPRequest struct {
 
 func Offer(id string, s *store.Store, c *gin.Context) {
 
+	ctx, cancel := context.WithCancel(context.Background())
 	pc := pion.NewPeerConnection(s.CustomLogger())
 
 	userID, _ := uuid.Parse(id)
-	u := user.NewZMeetUser(userID, "Hello", pc)
+	u := user.NewZMeetUser(userID, util.GenerateRandomHeroName(), pc, ctx, cancel)
+
+	go IsReady(pc, u)
 
 	init := webrtc.RTPTransceiverInit{
 		Direction: webrtc.RTPTransceiverDirectionSendrecv,
@@ -62,21 +67,21 @@ func Answer(id string, s *store.Store, c *gin.Context) {
 	})
 }
 
-func HandleHandshake(s *store.Store, c *gin.Context) {
+func ICECandidate(id string, s *store.Store, c *gin.Context) {
 
-	var sdp webrtc.SessionDescription
-	if err := c.ShouldBindJSON(&sdp); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid SDP offer"})
+	userID, _ := uuid.Parse(id)
+	u := s.GetZMeetUser(userID)
+	if u == nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "user not found"})
 		return
 	}
 
-	pc := pion.NewPeerConnection(s.CustomLogger())
-	pc.SetRemoteDescription(sdp)
-	answer, err := pc.CreateAnswer()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+	var ice webrtc.ICECandidateInit
+	if err := c.ShouldBindJSON(&ice); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid SDP ice candidate"})
+		return
 	}
 
-	pc.SetLocalDescription(answer)
-	c.JSON(http.StatusOK, answer)
+	pc := u.PeerConnection()
+	pc.AddICECandidate(ice)
 }

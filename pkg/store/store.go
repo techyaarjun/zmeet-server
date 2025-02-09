@@ -53,9 +53,10 @@ func (s *Store) RemoveAllZMeetUser() {
 func (s *Store) GetAllZMeetUsers() []*user.ZMeetUser {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res := make([]*user.ZMeetUser, 0, len(s.ZMeetUsers))
+
+	var res []*user.ZMeetUser
 	for _, z := range s.ZMeetUsers {
-		if z.Connected() == true {
+		if z.Connected() {
 			res = append(res, z)
 		}
 	}

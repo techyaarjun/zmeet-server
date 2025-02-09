@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"zmeet/pkg/api"
 	"zmeet/pkg/store"
-	"zmeet/pkg/ws"
 )
 
 func Initilize(store *store.Store) {
@@ -12,9 +11,6 @@ func Initilize(store *store.Store) {
 	r.Use(gin.Recovery())
 
 	r.GET("/ping", api.HandlePing)
-	r.GET("/ws", func(c *gin.Context) {
-		ws.HandleSocketConnection(c, store.CustomLogger())
-	})
 
 	handshake := r.Group(api.HandShake)
 	handshake.GET("/offer/:id", func(context *gin.Context) {
@@ -24,6 +20,15 @@ func Initilize(store *store.Store) {
 	handshake.POST("/answer/:id", func(context *gin.Context) {
 		id := context.Param("id")
 		api.Answer(id, store, context)
+	})
+	handshake.POST("/ice-candidate/:id", func(context *gin.Context) {
+		id := context.Param("id")
+		api.ICECandidate(id, store, context)
+	})
+
+	users := r.Group(api.Users)
+	users.GET("", func(c *gin.Context) {
+		api.ListAllUsers(c, store)
 	})
 
 	panic(r.Run())
