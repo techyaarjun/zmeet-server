@@ -3,7 +3,6 @@ package pion
 import (
 	"fmt"
 	"github.com/pion/webrtc/v4"
-	"log"
 	"sync"
 	"zmeet/pkg/logger"
 )
@@ -11,35 +10,38 @@ import (
 type PC struct {
 	mu              sync.RWMutex
 	peerConnection  *webrtc.PeerConnection
-	customLogger    *logger.Logger
+	dataChannel     *webrtc.DataChannel
 	iceConnected    bool
 	connectionState bool
 }
 
-func NewPeerConnection(l *logger.Logger) *PC {
+func NewPeerConnection() *PC {
 
 	mediaEngine := webrtc.MediaEngine{}
 	_ = mediaEngine.RegisterDefaultCodecs()
 
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine))
+	settingEngine := webrtc.SettingEngine{}
+	//settingEngine.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+	//settingEngine.SetNAT1To1IPs([]string{"172.20.10.2"}, webrtc.ICECandidateTypeHost)
+
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine), webrtc.WithSettingEngine(settingEngine))
 
 	config := webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
-			},
-		},
+		//ICEServers: []webrtc.ICEServer{
+		//	{
+		//		URLs: []string{"stun:stun.l.google.com:19302"},
+		//	},
+		//},
 	}
 
 	pc, err := api.NewPeerConnection(config)
 	if err != nil {
-		l.Debug("Failed to create peer connection")
+		logger.Error("Failed to create peer connection")
 		return nil
 	}
 
 	newPc := &PC{
 		peerConnection:  pc,
-		customLogger:    l,
 		iceConnected:    false,
 		connectionState: false,
 	}
@@ -62,16 +64,16 @@ func (p *PC) SetConnectionState(state bool) {
 	p.connectionState = state
 }
 
+func (p *PC) SetDC(dc *webrtc.DataChannel) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.dataChannel = dc
+}
+
 func (p *PC) PeerConnection() *webrtc.PeerConnection {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.peerConnection
-}
-
-func (p *PC) CustomLogger() *logger.Logger {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.customLogger
 }
 
 func (p *PC) ICEConnected() bool {
@@ -92,7 +94,7 @@ func (p *PC) CreateOffer() (webrtc.SessionDescription, error) {
 
 	sdp, err := p.peerConnection.CreateOffer(nil)
 	if err != nil {
-		p.customLogger.Debug("Failed to create offer")
+		logger.Error("Failed to create offer")
 		return webrtc.SessionDescription{}, err
 	}
 
@@ -105,7 +107,7 @@ func (p *PC) CreateAnswer() (webrtc.SessionDescription, error) {
 
 	sdp, err := p.peerConnection.CreateAnswer(nil)
 	if err != nil {
-		p.customLogger.Debug("Failed to create answer")
+		logger.Error("Failed to create answer")
 		return webrtc.SessionDescription{}, err
 	}
 
@@ -118,7 +120,7 @@ func (p *PC) SetLocalDescription(desc webrtc.SessionDescription) {
 
 	err := p.peerConnection.SetLocalDescription(desc)
 	if err != nil {
-		p.customLogger.Debug("Failed to set local description")
+		logger.Error("Failed to set local description")
 	}
 }
 
@@ -128,8 +130,7 @@ func (p *PC) SetRemoteDescription(desc webrtc.SessionDescription) {
 
 	err := p.peerConnection.SetRemoteDescription(desc)
 	if err != nil {
-		log.Println(err)
-		p.customLogger.Debug("Failed to set remote description")
+		logger.Error("Failed to set remote description")
 	}
 }
 
@@ -139,14 +140,14 @@ func (p *PC) AddICECandidate(ice webrtc.ICECandidateInit) {
 
 	err := p.peerConnection.AddICECandidate(ice)
 	if err != nil {
-		p.customLogger.Debug("Failed to add ICECandidate")
+		logger.Error("Failed to add ICE candidate")
 	}
 }
 
 func (p *PC) ICEConnectionStateChangeNotify() {
 	p.PeerConnection().OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		mess := fmt.Sprintf("ICE Connection State has changed to: %s", state.String())
-		p.CustomLogger().Info(mess)
+		logger.Info(mess)
 		if state == webrtc.ICEConnectionStateConnected {
 			p.SetICEConnected(true)
 		}
@@ -156,14 +157,14 @@ func (p *PC) ICEConnectionStateChangeNotify() {
 func (p *PC) SignalingStateChangeNotify() {
 	p.PeerConnection().OnSignalingStateChange(func(state webrtc.SignalingState) {
 		mess := fmt.Sprintf("Signaling State has changed to: %s", state.String())
-		p.CustomLogger().Info(mess)
+		logger.Info(mess)
 	})
 }
 
 func (p *PC) ConnectionStateChangeNotify() {
 	p.PeerConnection().OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		mess := fmt.Sprintf("Connection State has changed to: %s", state.String())
-		p.CustomLogger().Info(mess)
+		logger.Info(mess)
 		if state == webrtc.PeerConnectionStateConnected {
 			p.SetConnectionState(true)
 		}
@@ -173,6 +174,32 @@ func (p *PC) ConnectionStateChangeNotify() {
 func (p *PC) OnICECandidate() {
 	p.PeerConnection().OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		mess := fmt.Sprintf("Candiate : %s", candidate)
-		p.CustomLogger().Info(mess)
+		logger.Info(mess)
 	})
+}
+
+func (p *PC) OnDataChannel() {
+
+	dc, err := p.PeerConnection().CreateDataChannel("sender", &webrtc.DataChannelInit{})
+	if err != nil {
+		logger.Error("Failed to create data channel")
+		return
+	}
+
+	//p.SetDC(dc)
+
+	dc.OnOpen(func() {
+		mess := fmt.Sprintf("DataChannel Open")
+		logger.Info(mess)
+	})
+
+	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+		logger.Info(string(msg.Data))
+	})
+
+	dc.OnClose(func() {
+		mess := fmt.Sprintf("DataChannel Close")
+		logger.Info(mess)
+	})
+
 }

@@ -13,14 +13,12 @@ func Initilize(store *store.Store) {
 	r.GET("/ping", api.HandlePing)
 
 	handshake := r.Group(api.HandShake)
-	handshake.GET("/offer/:id", func(context *gin.Context) {
+
+	handshake.POST("/offer/:id", func(context *gin.Context) {
 		id := context.Param("id")
-		api.Offer(id, store, context)
+		api.POSTOffer(id, store, context)
 	})
-	handshake.POST("/answer/:id", func(context *gin.Context) {
-		id := context.Param("id")
-		api.Answer(id, store, context)
-	})
+
 	handshake.POST("/ice-candidate/:id", func(context *gin.Context) {
 		id := context.Param("id")
 		api.ICECandidate(id, store, context)

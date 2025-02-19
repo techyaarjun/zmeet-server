@@ -3,27 +3,18 @@ package store
 import (
 	"github.com/google/uuid"
 	"sync"
-	"zmeet/pkg/logger"
 	"zmeet/pkg/user"
 )
 
 type Store struct {
 	mu         sync.Mutex
 	ZMeetUsers map[uuid.UUID]*user.ZMeetUser
-	Logger     *logger.Logger
 }
 
-func NewStore(l *logger.Logger) *Store {
+func NewStore() *Store {
 	return &Store{
 		ZMeetUsers: make(map[uuid.UUID]*user.ZMeetUser),
-		Logger:     l,
 	}
-}
-
-func (s *Store) CustomLogger() *logger.Logger {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.Logger
 }
 
 func (s *Store) AddZMeetUser(z *user.ZMeetUser) {

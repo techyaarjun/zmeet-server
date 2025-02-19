@@ -1,7 +1,6 @@
-package main
+package server
 
 import (
-	_ "github.com/joho/godotenv/autoload"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,11 +9,11 @@ import (
 	"zmeet/pkg/store"
 )
 
-func main() {
-	customLogger := logger.NewLogger(logger.DEBUG)
-	customLogger.Info("Server started.")
+func Start() {
+	logger.NewLogger(logger.DEBUG)
+	logger.Info("Starting server")
 
-	newStore := store.NewStore(customLogger)
+	newStore := store.NewStore()
 
 	go gin.Initilize(newStore)
 
